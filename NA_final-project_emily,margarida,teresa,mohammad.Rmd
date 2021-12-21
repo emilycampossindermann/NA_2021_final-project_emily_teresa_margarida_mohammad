@@ -1,0 +1,450 @@
+---
+title: "Exploring the Dynamics between Social Media Use, Real-Life Socializing, Avoidance, and Mood"
+author: "Emily Campos Sindermann, Margarida Da Silva, Teresa Gehrig, Mohammad Hamdan"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document:
+    number_sections: yes
+    toc: yes
+fontsize: 11pt
+header-includes:
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage[english]{babel}
+  \usepackage{float}
+  \usepackage{array}
+  \usepackage{fancyhdr}
+  \usepackage{graphicx}
+  \usepackage{hyperref}
+  \usepackage{mathtools}
+  \usepackage{amsmath}
+  \usepackage{lmodern}
+  \renewcommand{\familydefault}{\sfdefault}
+---
+  
+```{r, include = FALSE}
+library(qgraph)
+library(tinytex)
+library(tidyverse)
+library(psych)
+library(kableExtra)
+library(bootnet)
+library(psychonetrics)
+library(graphicalVAR)
+```
+
+# Introduction
+In this project we wanted to investigate the relationship between social media use, real-life socializing and mood. To this end, two of out team members Margarida and Mohammad collected data on the following variables: 
+
+\begin{enumerate}
+  \item[(1)] \textbf{\textit{Social media use}}: included both active and passive online behaviors (Trifiro \& Gerson, 2019): active social media use comprised online behaviors that
+facilitate “direct exchanges” among users (e.g. liking, commenting, sending messages, and otherwise engaging with other users); passive social media use comprised monitoring of others without direct engagement (e.g. checking if someone has responded to a message). Subjects had to indicate approximately how many minutes they have engaged in online social activity since the last prompt.
+  \item[(2)] \textbf{\textit{Real-life socializing}}(hereinafter: socializing): Defined as any kind of voluntary interaction with other people for leisure. This includes e.g., talking to friends during class, but does not include ordering coffee from a barista. Subjects had to indicate approximately how many minutes they have engaged in offline social activity since the last prompt.
+  \item[(3)] \textbf{\textit{Mood}}
+  \begin{enumerate}
+  \item \textbf{\textit{Positive mood}}: Included moods such as energetic, enthusiastic and content (Fisher et al., 2017)
+  \item \textbf{\textit{Negative mood}}: Including moods such as angry and afraid (Fisher et al., 2017).
+  \end{enumerate}
+  \item[(3)] \textbf{\textit{Behavioral avoidance}}: refraining from, or escaping from, an action, person or thing (Ottenbreit \& Dobson, 2004)
+    \begin{enumerate}
+    \item \textbf{\textit{Avoiding people}}
+    \item \textbf{\textit{Avoiding activities}}
+    \item \textbf{\textit{Procrastination}}
+    \end{enumerate}
+\end{enumerate}
+
+The subjects filled in a Qualtrics survey four times a day (1 p.m., 4 p.m., 7 p.m., 10 p.m.), starting Nov 17, 2021 and ending on Dec 12, 2021 (a total of 26 days). This yielded 104 time-points for each subject, which we used to estimate and compare their personalized networks. 
+
+# Data Import
+```{r, message = FALSE, warning = FALSE}
+data <- read_csv("Network Analysis final data.csv")
+data <- data[-c(1:2), ]
+data <- data %>%
+  select("date_time" = RecordedDate,
+         "person" = Q3,
+         "social_media" = Q6,
+         "socializing" = Q7,
+         "avoid_people" = Q8,
+         "avoid_activities" = Q9,
+         "procrastinating" = Q10,
+         "positive" = Q1,
+         "negative" = Q5,
+         "submit" = Q4) %>%
+    filter(submit == 1) %>% 
+    add_column("day" = rep(c(1:26), each = 8), #counting days
+               "time" = rep(c(1:4), 52),
+               "conc" = c(1:208))%>%
+    select(-submit) %>% 
+    relocate(conc, day, time, #reorganizing columns
+           social_media, socializing,
+           avoid_people, avoid_activities, procrastinating, positive, negative,
+           person, date_time)
+
+data[, 4:(ncol(data)-1)] <- sapply(data[, 4:(ncol(data)-1)], as.numeric)
+
+#separate datasets
+margarida <- filter(data, person == 2)
+mohammad <- filter(data, person == 1)
+data$person <- ifelse(data$person == 2, "Margarida", "Mohammad")
+```
+
+
+# Descriptive Statistics
+
+
+```{r Boxp-Social, fig.cap = "Socializing"}
+ggplot(data, mapping = aes(y = socializing))+
+  geom_boxplot(fill = c("paleturquoise1", "lightseagreen"))+
+  scale_x_discrete(NULL)+
+  facet_wrap(~person)+
+  labs(y = "Time (in minutes)")
+```
+
+
+```{r Boxp-SM, fig.cap="Social media use"}
+ggplot(data, mapping = aes(y = social_media))+
+  geom_boxplot(fill = c("paleturquoise1", "lightseagreen"))+
+  facet_wrap(~person)+
+  scale_x_discrete(NULL)+
+  labs(y = "Time (in minutes)")
+```
+
+# Stationarity
+Before we start the analysis of our time-series data, we first check if the assumption of stationarity holds. To do so, we regress each variable on time. If the summary indicates time to be a significant predictor, we assume that the assumption of stationarity is violated. To give an idea of how we assess stationarity, we summarize the linear model for one variable and plot the time-series. We choose not to report this process for every variable. \newline For one of our subjects (Margarida), we found **socializing** to be non-stationary (see Fig. 3).  
+
+```{r}
+#Margarida
+mar_stationarity <- data.frame(
+  "social_media" = summary(lm(social_media~conc, data=margarida))$coef["conc",4],
+  "socializing" = summary(lm(socializing~conc, data = margarida))$coef["conc",4],
+  "avoid_people" = summary(lm(avoid_people~conc, data = margarida))
+  $coef["conc",4],
+  "avoid_activities" = summary(lm(avoid_activities ~ conc, data = margarida))
+  $coef["conc",4],
+  "procrastinating" = summary(lm(procrastinating~conc, data = margarida))
+  $coef["conc",4],
+  "positive_mood" = summary(lm(positive~conc, data = margarida))$coef["conc",4],
+  "negative_mood" = summary(lm(negative ~ conc, data = margarida))
+  $coef["conc",4]
+)
+
+mar_stationarity %>% 
+  kable(caption = "Margarida - p-values of Stationarity Check") %>% 
+  kable_styling(latex_options = c("striped", "HOLD_position", "scale_down"))
+#add short table description
+
+```
+
+
+```{r ts-mar-soc, fig.cap="Margarida - Socializing"}
+#plot socializing (time as significant predictor!)
+plot(ts(margarida$socializing, start = 1, end = 26, frequency = 4),  
+     ylab = "Time (in minutes)", 
+     xlab = "Day")
+#we see a slight trend here 
+```
+
+
+```{r de-trend-mar}
+#De-Trending significant vars
+margarida$socializing[!is.na(margarida$socializing)] <-
+  residuals(lm(socializing~conc, data = margarida))
+
+margarida$avoid_activities[!is.na(margarida$avoid_activities)] <- 
+  residuals(lm(avoid_activities~conc, data = margarida))
+
+margarida$avoid_people[!is.na(margarida$avoid_people)] <- 
+  residuals(lm(avoid_people~conc, data = margarida))
+
+margarida$procrastinating[!is.na(margarida$procrastinating)] <- 
+  residuals(lm(procrastinating~conc, data = margarida))
+
+margarida$social_media[!is.na(margarida$social_media)] <- 
+  residuals(lm(social_media~conc, data = margarida))
+```
+
+
+
+```{r }
+moh_stationarity <- data.frame(
+  "social_media" = summary(lm(social_media~conc, data=mohammad))$coef["conc",4],
+  "socializing" = summary(lm(socializing~conc, data = mohammad))$coef["conc",4],
+  "avoid_people" = summary(lm(avoid_people~conc, data = mohammad))
+  $coef["conc",4],
+  "avoid_activities" = summary(lm(avoid_activities ~ conc, data = mohammad))
+  $coef["conc",4],
+  "procrastinating" = summary(lm(procrastinating~conc, data = mohammad))
+  $coef["conc",4],
+  "positive_mood" = summary(lm(positive~conc, data = mohammad))$coef["conc",4],
+  "negative_mood" = summary(lm(negative ~ conc, data = mohammad))$coef["conc",4]
+)
+
+moh_stationarity %>% 
+  kable(caption = "Mohammad - p-values of Stationarity Check") %>% 
+  kable_styling(latex_options = c("striped", "HOLD_position", "scale_down"))
+```
+
+
+
+```{r de-trend-moh}
+##De-Trend
+mohammad$negative[!is.na(mohammad$negative)] <-
+  residuals(lm(negative~conc, data = mohammad))
+```
+
+
+We detrended the variables that violated the stationarity assumption.
+
+# Network Estimation
+In order to explore the different estimation techniques for time-series networks, we estimated the temporal as well as contemporaneous networks of Margarida and Mohammad with both the regularized (`graphicalVAR`) and the maximum likelihood estimation (`gvar`). For visual comparison we used the average layout and the same maximum value in the `qgraph` function. To make our networks more inclusive, we choose a colorblind theme.
+
+First, we pre-defined the variables corresponding to the nodes in the time-series networks (i.e., social media use (in minutes), socializing (in minutes), behavioral avoidance (avoiding people, avoiding activities,
+procrastination), positive and negative mood). We grouped them within a list for subsequent graphical choices. 
+
+
+```{r}
+vars <- c("social_media",
+         "socializing",
+         "avoid_people",
+         "avoid_activities",
+         "procrastinating",
+         "positive",
+         "negative")
+
+
+
+groups <- list(
+  "Social media use" = 1,
+  "Socializing" = 2,
+  "Behavioral avoidance" = c(3:5), 
+  "Mood" = c(6, 7)
+)
+```
+
+
+```{r colors}
+colGrp <- c("lightgoldenrod", "tan2", "mediumaquamarine", "plum3")
+```
+
+
+## Regularized Estimation using `graphicalVAR`
+
+First we used the regularized estimator `graphicalVAR`. By indicating the beepvariable *time* we ensured that the algorithm corrects for the night between measures, thereby meeting the assumption of equidistant measures. Setting the gamma-parameter to zero, we obtain a network optimizing the BIC criterion. \newline We first estimated the networks and then visually compared them between subjects. 
+
+```{r, warning=FALSE, cache = TRUE}
+network_mar <- graphicalVAR(margarida, vars = vars,
+         beepvar = "time", dayvar = "day", gamma = 0) 
+network_moh <- graphicalVAR(mohammad, vars = vars,
+         beepvar = "time", dayvar = "day", gamma = 0) 
+#gamma = 0 -> optimizes BIC criterion (not default EBIC)
+
+L1 <- averageLayout(network_mar$PCC, network_moh$PCC) 
+```
+
+
+### Contemporaneous Networks
+
+First, we compare the contemporaneous networks of Mohammad and Margarida. We make sure to use an average layout to ensure (visual) comparability. We manually set the same `maximum` argument in the `qgraph()`function. \newline To make our networks more inclusive, we choose a colorblind theme. 
+
+```{r mar-contemp, fig.cap="Margarida - Contemporaneous Network, using graphicalVAR", warning = FALSE}
+qgraph(network_mar$PCC, 
+       layout = L1,
+       theme = "colorblind", 
+       labels = vars,
+       maximum = max(network_mar$PCC, network_moh$PCC),
+       groups = groups, 
+       color = colGrp,
+       legend.cex = 0.5,
+       bg="transparent",
+       threshold = 0.05)
+```
+
+```{r moh-contemp, fig.cap="Mohammad - Contemporaneous Network, using graphicalVAR", warning = FALSE}
+qgraph(network_moh$PCC, 
+       layout = L1, 
+       theme = "colorblind", 
+       labels = vars,
+       maximum = max(network_mar$PCC, network_moh$PCC),
+       groups = groups,
+       color = colGrp,
+       bg = NULL,
+       transparency = TRUE,
+       legend.cex = .5,
+       bg="transparent",
+       threshold = 0.05)
+
+```
+
+### Correlating weights matrices
+
+```{r}
+corMat <- cor(network_mar$PCC, network_moh$PCC) 
+#partial contemporaneous correlations (PCC)
+
+
+corMat %>% 
+  kable(caption = "Correlation of Weights Matrices, graphicalVAR") %>% 
+  kable_styling(latex_options = c("striped", "HOLD_position", "scale_down"))
+```
+
+The correlations between the contemporaneous networks estimated via `graphicalVAR` show that our two subjects' weights matrices were not highly correlated in most cases. The highest correlations could be seen between the same nodes of both subjects (e.g. r(positive-positive) = .81).
+
+### Temporal Networks 
+```{r mar-temp, fig.cap= "Margarida - Temporal Network, using graphicalVAR", warning = FALSE}
+L2 <- averageLayout(network_mar$PDC, network_moh$PDC)
+# partial directed correlations (PDC)
+qgraph(network_mar$PDC, 
+       layout = L2, 
+       theme = "colorblind", 
+       labels = vars, 
+       groups = groups,
+       color = colGrp,
+       bg = NULL,
+       transparency = TRUE,
+       legend.cex = .5,
+       bg="transparent",
+       threshold = 0.05)
+```
+
+```{r moh-temp, fig.cap="Mohammad - Temporal Network, using graphicalVAR", warning=F}
+qgraph(network_moh$PDC, 
+       layout = L2, 
+       theme = "colorblind", 
+       labels = vars, 
+       groups = groups, 
+       color = colGrp,
+       bg = NULL, 
+       transparency = TRUE,
+       legend.cex = .5,
+       bg="transparent",
+       threshold = 0.05)
+
+```
+
+
+Using the regularized estimation we get very sparse networks. \newline When optimizing the **EBIC** which we did in a previous analysis, we even found both networks to be empty. This is due to the edges being pulled to zero by the algorithm. 
+
+## Maximum Likelihood Estimation using `gvar`
+In a second step, we re-run the analysis done before, using `gvar`. This function estimates the network via maximum likelihood estimation and might yield different results than an analysis with `graphicalVAR`.
+
+
+### Model Estimation
+
+As before, we first estimate the networks for both, Mohammad and Margarida.
+
+```{r, message = FALSE, warning = FALSE}
+#Margarida
+network_mar2 <- gvar(margarida, vars = vars, dayvar = "day", beepvar = "time",
+estimator = "FIML") %>% runmodel
+#Mohammad
+network_moh2 <- gvar(mohammad, vars = vars, dayvar = "day", beepvar = "time",
+estimator = "FIML") %>% runmodel 
+```
+
+Then, we store the weights matrices for the contemporaneous and temporal network for both subjects. 
+
+```{r, warning=FALSE}
+#Margarida's weights-matrices
+mar_matrix <- getmatrix(network_mar2, "omega_zeta") #contemp. 
+mar_matrix2 <- getmatrix(network_mar2, "PDC") #temporal 
+
+#Mohammad's weights-matrices
+moh_matrix <- getmatrix(network_moh2, "omega_zeta") #contemp. 
+moh_matrix2 <- getmatrix(network_moh2, "PDC") #temporal 
+
+max1 <- max(moh_matrix, mar_matrix)
+max2 <- max(moh_matrix2[,-(1:2)], mar_matrix2[,-(1:2)])
+  #omitting cols 1 and 2 because they give NaN estimations
+L3 <- averageLayout(mar_matrix, mar_matrix2, moh_matrix, moh_matrix2)
+
+```
+
+
+### Contemporaneous Networks
+
+```{r mar-contemp2, fig.cap= "Margarida - Contemporaneous Network, using gvar", warning=FALSE}
+qgraph(mar_matrix, 
+       theme = "colorblind", 
+       labels = vars, 
+       layout = L3,
+       groups = groups,
+       color = colGrp,
+       maximum =max1,
+       legend.cex = .5,
+       bg="transparent",
+       #legend = FALSE, set to FALSE in order to obtain a graph without a legend for the poster
+       vsize = 15,
+       threshold = 0.05
+       )
+```
+```{r moh-contemp2, fig.cap="Mohammad - Contemporaneous Network, using gvar", warning = FALSE}
+qgraph(moh_matrix, 
+       labels = vars, 
+       theme = "colorblind",
+       layout = L3, 
+       groups = groups,
+       color = colGrp,
+       maximum = max1,
+       legend.cex = .5,
+       bg="transparent",
+       #legend = FALSE,
+       vsize = 15,
+       threshold = 0.05
+) 
+```
+
+The two networks show opposite effects in the relationship between social media use and real-life socializing. Mohammad’s network showed a strong negative correlation, while Margarida’s showed a weaker positive one. A possible explanation relates to how much social interactions are centered around social media use. For example, when checking something funny on social media with your friends. \newline Socializing also had opposite relations with behavioral avoidance components. Margarida had a positive correlation between socializing and behavioral avoidance, and these were strongly positively correlated between them. This means that, for Margarida, socializing with others is related to more behavioral avoidance. Mohammad, on the other hand, showed a negative correlation between socializing and behavioral avoidance, and the individual components were weakly correlated. \newline Finally, we also noticed a key difference in the relation between socializing and mood in the two networks. Margarida shows an overall negative correlation between mood and socializing, but positive between social media use and positive mood. Mohammad’s network showed the opposite effect. This could be because of differences in the trait of introversion, or also differences in how social media is used (e.g. to talk to others which increases positive mood despite being on social media).
+
+
+### Temporal Networks
+```{r mar-temp2, fig.cap= "Margarida - Temporal Network, using gvar", warning = F}
+qgraph(mar_matrix2, 
+       labels = vars, 
+       theme = "colorblind", 
+       layout = L3,
+       groups = groups,
+       color = colGrp,
+       maximum = max2,
+       legend.cex = .5,
+       layoutScale = c(1,0.8),
+       layoutOffset = c(0, -0.2),
+       bg="transparent",
+       legend = FALSE,
+       vsize = 15,
+       threshold = 0.05)
+```
+
+```{r moh-temp2, fig.cap= "Mohammad - Temporal Network, using gvar", warning=F}
+qgraph(moh_matrix2, 
+       labels = vars, 
+       theme = "colorblind",
+       layout = L3,
+       groups = groups,
+       color = colGrp, 
+       maximum = max2,
+       legend.cex = .5,
+       bg="transparent",
+       #legend = FALSE,
+       vsize = 15,
+       threshold = 0.05
+       )
+```
+
+
+\newpage
+First, we noticed a key difference in the relationship between social media and socializing. Margarida’s network showed a negative two-way effect between these variables, while Mohammad’s showed no link. \newline Similarly, in both networks there is an increase in behavioral avoidance after socializing. This could mean that, perhaps due to introversion, both participants found it necessary to avoid others and certain activities after having real-life interactions to “recharge”. \newline In terms of mood, Mohammad’s network showed that there was a decrease in both positive and negative mood after socializing, and an increase in positive mood after using social media. For Margarida, on the other hand, socializing tended to lead to an increase in negative mood and a decrease in positive mood later on. Additionally, using social media at one point did not seem to affect her mood later on, as there was no edge. \newline Finally, Margarida’s network showed two weak self-loops. They show that procrastinating at one point led to more procrastinating later on, and socializing led to less socializing later on. Mohammad’s network did not show any self-loops.
+
+Interestingly, the relationships between our variables of interest indicated by the networks now look drastically different than above when we used `graphicalVAR`!
+
+
+
+\newpage
+# References
+
+Fisher, A. J., Reeves, J. W., Lawyer, G., Medaglia, J. D., & Rubel, J. A. (2017). Exploring the idiographic
+dynamics of mood and anxiety via network analysis. *Journal of abnormal psychology, 126 (8)*, 1044.
+
+
+Ottenbreit, N. D., & Dobson, K. S. (2004). Avoidance and depression: the construction of the Cognitive–Behavioral Avoidance Scale. *Behaviour research and therapy, 42(3)*, 293-313.
+
+
