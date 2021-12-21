@@ -1,1 +1,5 @@
-# NA_2021_final-project_emily_teresa_margarida_mohammad
+# Exploring the Dynamics between Social Media Use, Real-Life Socializing, Avoidance, and Mood  
+
+Within the scope of our final project for the course 'Network Analysis' at the University of Amsterdam, we decided to compare the personalized networks of Margarida and Mohammad, in order to better understand the individual dynamics between social media use, real-life socializing, avoidance and mood. 
+
+This repository contains the time-series data we collected on our two subjects, our analysis code as well as a Rmd file summarizing our project, analyses and network interpretations. 
